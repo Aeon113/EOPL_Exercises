@@ -22,38 +22,48 @@
 
 (define grammar-spec
   '([A-Program (Exp) a-program]
+    [Exp ("-" num) negative-const-exp]
     [Exp (num) const-exp]
-    [Exp ("-" "(" Exp "," Exp ")") diff-exp]
+    [Exp ("-(" Exp "," Exp ")") diff-exp]
     [Exp ("zero?" "(" Exp ")") zero?-exp]
     [Exp ("if" Exp "then" Exp "else" Exp) if-exp]
     [Exp (id) var-exp]
     [Exp ("let" id "=" Exp "in" Exp) let-exp]
     [Exp ("proc" "(" id ")" Exp) proc-exp]
     [Exp ("(" Exp Exp ")") call-exp]
+    [Exp ("letrec" id "(" id ")" "=" Exp "in" Exp) letrec-exp]
     ))
 
 (sllgen:make-define-datatypes scanner-spec grammar-spec)
 (define scan&parse (sllgen:make-string-parser scanner-spec grammar-spec))
 
 ; ---env---
-(define (empty-env) '())
+(define (empty-env)
+  (lambda (x)
+    (eopl:error
+     'apply-env
+     "No such variable: ~A~%"
+     x)))
 
 (define (extend-env var val env)
-  (cons
-   (list var val)
-   env))
+  (lambda (x)
+    (if (eqv? x var)
+       val
+       (env x))))
 
 (define (apply-env env var)
-  (if (null? env)
-      (eopl:error 'apply-env "No such variable: ~A~%" var)
-      (let ([current (car env)] [rest (cdr env)])
-        (if (equal? (car current) var)
-            (cadr current)
-            (apply-env rest var)))))
+  (env var))
+
+(define (extend-env-rec proc-name bound-var proc-body env)
+  (lambda (x)
+    (if (eqv? x proc-name)
+       (procedure bound-var proc-body (extend-env-rec proc-name bound-var proc-body env))
+       (env x))))
 
 ; ---evaluators---
 (define (evaluate-exp exp env)
   (cases Exp exp
+    [negative-const-exp (num) (- num)]
     [const-exp (num) num]
     [diff-exp (lhs rhs) (- (evaluate-exp lhs env) (evaluate-exp rhs env))]
     [zero?-exp (x) (eqv? 0 (evaluate-exp x env))]
@@ -73,6 +83,9 @@
              (procedure var body env)]
     [call-exp (rator rand)
              (apply-procedure (evaluate-exp rator env) (evaluate-exp rand env))]
+    [letrec-exp (proc-name proc-var proc-body letrec-body)
+               (evaluate-exp letrec-body
+                            (extend-env-rec proc-name proc-var proc-body env))]
     ))
 
 ; ---user interface---

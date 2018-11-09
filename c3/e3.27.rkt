@@ -1,18 +1,36 @@
 #lang eopl
 
-; ---For procedures---
-(define proc?
-  (lambda (val)
-    (procedure? val)))
+; ---Value defination---
+(define-datatype expval expval?
+  [num-val (num number?)]
+  [bool-val (bool boolean?)]
+  [proc-val (proc proc?)])
 
-(define procedure
-  (lambda (var body env)
-    (lambda (val)
-      (value-of body (extend-env var val env)))))
+; ---For procedures---
+(define-datatype proc proc?
+  [procedure
+   (var symbol?)
+   (body Exp?)
+   (saved-env env?)]
+  [trace-procedure
+   (var symbol?)
+   (body Exp?)
+   (saved-env env?)]
+  )
 
 (define apply-procedure
   (lambda (proc1 val)
-    (proc1 val)))
+    (cases proc proc1
+      [procedure (var body saved-env)
+                (value-of body (extend-env var val saved-env))]
+      [trace-procedure (var body saved-env)
+                      (begin
+                        (eopl:printf  "Entering trace-procedure~%~A:~%" proc1)
+                        (let ([result (value-of body (extend-env var val saved-env))])
+                          (begin
+                            (eopl:printf "Leaving trace-procedure~%~A:~%~%" proc1)
+                             result)))]
+      )))
 
 ; ---grammar and type definations---
 (define scanner-spec
@@ -30,6 +48,7 @@
     [Exp ("let" id "=" Exp "in" Exp) let-exp]
     [Exp ("proc" "(" id ")" Exp) proc-exp]
     [Exp ("(" Exp Exp ")") call-exp]
+    [Exp ("traceproc" "(" id ")" Exp) traceproc-exp]
     ))
 
 (sllgen:make-define-datatypes scanner-spec grammar-spec)
@@ -37,6 +56,7 @@
 
 ; ---env---
 (define (empty-env) '())
+(define env? (list-of list?))
 
 (define (extend-env var val env)
   (cons
@@ -51,15 +71,27 @@
             (cadr current)
             (apply-env rest var)))))
 
-; ---evaluators---
+; ---evaluators and algorithms and extractors---
+(define (get-val val)
+  (cases expval val
+    [num-val (num) num]
+    [bool-val (bool) bool]
+    [proc-val (proc) proc]))
+
+(define (substract-exp exp1 exp2)
+  (num-val
+   (-
+    (get-val exp1)
+    (get-val exp2))))
+
 (define (evaluate-exp exp env)
   (cases Exp exp
-    [const-exp (num) num]
-    [diff-exp (lhs rhs) (- (evaluate-exp lhs env) (evaluate-exp rhs env))]
-    [zero?-exp (x) (eqv? 0 (evaluate-exp x env))]
+    [const-exp (num) (num-val num)]
+    [diff-exp (lhs rhs) (substract-exp (evaluate-exp lhs env) (evaluate-exp rhs env))]
+    [zero?-exp (x) (bool-val (eqv? 0 (get-val (evaluate-exp x env))))]
     [if-exp (exp1 exp2 exp3)
             (evaluate-exp
-             (if (evaluate-exp exp1 env) exp2 exp3)
+             (if (get-val (evaluate-exp exp1 env)) exp2 exp3)
              env)]
     [var-exp (var) (apply-env env var)]
     [let-exp (var val body)
@@ -71,6 +103,8 @@
                env))]
     [proc-exp (var body)
              (procedure var body env)]
+    [traceproc-exp (var body)
+                  (trace-procedure var body env)]
     [call-exp (rator rand)
              (apply-procedure (evaluate-exp rator env) (evaluate-exp rand env))]
     ))
@@ -80,4 +114,4 @@
 (define (value-of-program program-str)
   (cases A-Program (scan&parse program-str)
     [a-program (exp)
-               (evaluate-exp exp (empty-env))]))
+               (get-val (evaluate-exp exp (empty-env)))]))
